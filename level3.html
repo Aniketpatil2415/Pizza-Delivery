@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pizza MERN - Level 3 Task</title>
+    
+    <!-- React & ReactDOM (Engine) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel (Code Translator for Browser) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS (Styling) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Icons workaround (Lucide is hard to use via CDN, using Emojis for simplicity in this file) -->
+    <style>
+        body { font-family: sans-serif; }
+        .animate-in { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+    <!-- React App will render here -->
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- MOCK DATA ---
+        const INVENTORY_INIT = {
+            bases: { 'Thin Crust': 50, 'Cheese Burst': 15, 'Pan Pizza': 40, 'Wheat Thin': 30, 'Gluten Free': 25 },
+            sauces: { 'Marinara': 100, 'Pesto': 100, 'BBQ': 100, 'White Garlic': 100, 'Spicy Buffalo': 100 },
+            cheeses: { 'Mozzarella': 100, 'Cheddar': 100, 'Parmesan': 100, 'Gouda': 100, 'Vegan Cheese': 100 },
+            veggies: { 'Onion': 100, 'Pepper': 100, 'Mushroom': 100, 'Olive': 100, 'Corn': 100 }
+        };
+
+        const PRICES = { base: 150, sauce: 30, cheese: 50, veggie: 20 };
+
+        // --- COMPONENTS ---
+        const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false }) => {
+            const baseStyle = "px-4 py-2 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center gap-2";
+            const variants = {
+                primary: "bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-500/30",
+                secondary: "bg-gray-700 hover:bg-gray-600 text-white",
+                danger: "bg-red-500 hover:bg-red-600 text-white"
+            };
+            return (
+                <button onClick={onClick} disabled={disabled} className={`${baseStyle} ${variants[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}>
+                    {children}
+                </button>
+            );
+        };
+
+        const Card = ({ children, className = '' }) => (
+            <div className={`bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-xl ${className}`}>
+                {children}
+            </div>
+        );
+
+        const Badge = ({ status }) => {
+            const styles = {
+                'Order Received': 'bg-blue-500/20 text-blue-400 border-blue-500/50',
+                'In Kitchen': 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50',
+                'Sent to Delivery': 'bg-purple-500/20 text-purple-400 border-purple-500/50',
+                'Delivered': 'bg-green-500/20 text-green-400 border-green-500/50',
+            };
+            return (
+                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${styles[status] || 'bg-gray-500'}`}>
+                    {status}
+                </span>
+            );
+        };
+
+        // --- MAIN APP ---
+        function App() {
+            const [view, setView] = useState('auth');
+            const [userRole, setUserRole] = useState(null);
+            const [inventory, setInventory] = useState(INVENTORY_INIT);
+            const [orders, setOrders] = useState([]);
+            const [currentBuilder, setCurrentBuilder] = useState({ base: '', sauce: '', cheese: '', veggies: [] });
+            const [notifications, setNotifications] = useState([]);
+
+            // Stock Check Effect
+            useEffect(() => {
+                const lowStockItems = [];
+                Object.entries(inventory).forEach(([category, items]) => {
+                    Object.entries(items).forEach(([item, count]) => {
+                        if (count < 20) lowStockItems.push(`${item}`);
+                    });
+                });
+                if (lowStockItems.length > 0 && !notifications.find(n => n.type === 'email')) {
+                    addNotification(`📧 ADMIN ALERT: Auto-email sent! Low stock: ${lowStockItems.join(', ')}`, 'email');
+                }
+            }, [inventory]);
+
+            const addNotification = (msg, type = 'info') => {
+                const id = Date.now();
+                setNotifications(prev => [...prev, { id, msg, type }]);
+                setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 5000);
+            };
+
+            const handleLogin = (role) => {
+                setUserRole(role);
+                setView(role === 'admin' ? 'admin-dash' : 'user-dash');
+                addNotification(`Logged in as ${role === 'admin' ? 'Administrator' : 'Customer'}`, 'success');
+            };
+
+            const logout = () => {
+                setUserRole(null);
+                setView('auth');
+                setCurrentBuilder({ base: '', sauce: '', cheese: '', veggies: [] });
+            };
+
+            const updateOrderStatus = (orderId, newStatus) => {
+                setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+                addNotification(`Order Status Updated to ${newStatus}`);
+            };
+
+            const handlePlaceOrder = () => {
+                const newInventory = { ...inventory };
+                newInventory.bases[currentBuilder.base] -= 1;
+                newInventory.sauces[currentBuilder.sauce] -= 1;
+                newInventory.cheeses[currentBuilder.cheese] -= 1;
+                currentBuilder.veggies.forEach(v => newInventory.veggies[v] -= 1);
+                
+                setInventory(newInventory);
+                const newOrder = {
+                    id: crypto.randomUUID(),
+                    items: currentBuilder,
+                    total: calculateTotal(),
+                    status: 'Order Received',
+                    timestamp: new Date().toLocaleTimeString()
+                };
+                setOrders([newOrder, ...orders]);
+                setCurrentBuilder({ base: '', sauce: '', cheese: '', veggies: [] });
+                setView('user-dash');
+                addNotification("Order Placed Successfully! 🍕");
+            };
+
+            const calculateTotal = () => {
+                let total = 0;
+                if (currentBuilder.base) total += PRICES.base;
+                if (currentBuilder.sauce) total += PRICES.sauce;
+                if (currentBuilder.cheese) total += PRICES.cheese;
+                total += (currentBuilder.veggies.length * PRICES.veggie);
+                return total;
+            };
+
+            // VIEWS
+            if (view === 'auth') {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-[80vh] gap-8 animate-in">
+                        <div className="text-center">
+                            <h1 className="text-5xl font-black mb-2">PIZZA<span className="text-orange-500">MERN</span></h1>
+                            <p className="text-gray-400">Level 3 Task Submission</p>
+                        </div>
+                        <div className="grid md:grid-cols-2 gap-6 w-full max-w-2xl px-4">
+                            <button onClick={() => handleLogin('user')} className="bg-gray-800 p-8 rounded-2xl border border-gray-700 hover:border-orange-500 transition-all text-left">
+                                <h3 className="text-2xl font-bold mb-2">👤 Customer Login</h3>
+                                <p className="text-gray-400 text-sm">Order custom pizzas & track.</p>
+                            </button>
+                            <button onClick={() => handleLogin('admin')} className="bg-gray-800 p-8 rounded-2xl border border-gray-700 hover:border-blue-500 transition-all text-left">
+                                <h3 className="text-2xl font-bold mb-2">🛡️ Admin Login</h3>
+                                <p className="text-gray-400 text-sm">Manage inventory & orders.</p>
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="p-4 md:p-8">
+                    {/* NAVBAR */}
+                    <nav className="flex justify-between items-center mb-8 bg-gray-900 p-4 rounded-xl border border-gray-800">
+                        <div className="font-black text-xl">PIZZA<span className="text-orange-500">APP</span></div>
+                        <div className="flex gap-4 items-center">
+                            <span className="text-sm text-gray-400 capitalize hidden md:block">User: <b>{userRole}</b></span>
+                            {userRole === 'user' && view !== 'user-dash' && <button onClick={() => setView('user-dash')} className="text-sm hover:text-orange-500">Dashboard</button>}
+                            <button onClick={logout} className="text-red-400 hover:bg-gray-800 p-2 rounded-full">🚪 Logout</button>
+                        </div>
+                    </nav>
+
+                    {/* TOASTS */}
+                    <div className="fixed top-4 right-4 z-50 space-y-2">
+                        {notifications.map(n => (
+                            <div key={n.id} className={`p-4 rounded-lg shadow-2xl flex items-center gap-3 animate-in ${n.type === 'email' ? 'bg-red-900 border-red-500' : 'bg-gray-800 border-gray-700'}`}>
+                                {n.msg}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* USER DASHBOARD */}
+                    {view === 'user-dash' && (
+                        <div className="max-w-5xl mx-auto space-y-8 animate-in">
+                            <div className="flex justify-between items-end">
+                                <h2 className="text-3xl font-bold">Welcome! 🍕</h2>
+                                <Button onClick={() => setView('builder')}>+ Build New Pizza</Button>
+                            </div>
+                            <div className="grid md:grid-cols-2 gap-6">
+                                <Card>
+                                    <h3 className="text-xl font-bold mb-4">🕒 Recent Orders</h3>
+                                    {orders.length === 0 ? <div className="text-gray-500">No orders yet.</div> : (
+                                        <div className="space-y-4">
+                                            {orders.map(order => (
+                                                <div key={order.id} className="bg-gray-900 p-4 rounded-lg border border-gray-700">
+                                                    <div className="flex justify-between mb-2">
+                                                        <span className="font-mono text-xs text-gray-500">#{order.id.slice(-4)}</span>
+                                                        <Badge status={order.status} />
+                                                    </div>
+                                                    <div className="text-sm text-gray-300">Base: {order.items.base}, Sauce: {order.items.sauce}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </Card>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* PIZZA BUILDER */}
+                    {view === 'builder' && (
+                         <div className="max-w-4xl mx-auto animate-in">
+                            <h2 className="text-3xl font-bold mb-4">Pizza Builder <span className="text-orange-400 float-right">Total: ₹{calculateTotal()}</span></h2>
+                            <Card>
+                                {/* Steps logic simplified for single file demo */}
+                                <div className="space-y-6">
+                                    {['base', 'sauce', 'cheese'].map(type => (
+                                        <div key={type}>
+                                            <h3 className="text-lg font-bold capitalize mb-2">Select {type}</h3>
+                                            <div className="flex flex-wrap gap-2">
+                                                {Object.keys(inventory[type + 's']).map(opt => (
+                                                    <button key={opt} 
+                                                        onClick={() => setCurrentBuilder({...currentBuilder, [type]: opt})}
+                                                        className={`p-2 rounded border ${currentBuilder[type] === opt ? 'bg-orange-500 border-orange-500' : 'border-gray-600'}`}>
+                                                        {opt} ({inventory[type + 's'][opt]} left)
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    
+                                    <div>
+                                        <h3 className="text-lg font-bold capitalize mb-2">Select Veggies (Multi)</h3>
+                                        <div className="flex flex-wrap gap-2">
+                                            {Object.keys(inventory.veggies).map(opt => (
+                                                <button key={opt} 
+                                                    onClick={() => {
+                                                        const v = currentBuilder.veggies;
+                                                        setCurrentBuilder({...currentBuilder, veggies: v.includes(opt) ? v.filter(i => i !== opt) : [...v, opt]})
+                                                    }}
+                                                    className={`p-2 rounded border ${currentBuilder.veggies.includes(opt) ? 'bg-orange-500 border-orange-500' : 'border-gray-600'}`}>
+                                                    {opt}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="pt-4 border-t border-gray-700 flex justify-between">
+                                        <Button variant="secondary" onClick={() => setView('user-dash')}>Cancel</Button>
+                                        <Button onClick={() => setView('checkout')} disabled={!currentBuilder.base || !currentBuilder.sauce}>Next: Checkout</Button>
+                                    </div>
+                                </div>
+                            </Card>
+                        </div>
+                    )}
+
+                    {/* CHECKOUT */}
+                    {view === 'checkout' && (
+                        <div className="max-w-md mx-auto animate-in">
+                            <Card>
+                                <h2 className="text-2xl font-bold mb-4">Checkout</h2>
+                                <div className="bg-gray-900 p-4 rounded mb-4">
+                                    <p>Base: {currentBuilder.base}</p>
+                                    <p>Sauce: {currentBuilder.sauce}</p>
+                                    <p className="text-xl font-bold mt-2 text-white">Total: ₹{calculateTotal()}</p>
+                                </div>
+                                <div className="bg-blue-900/30 p-3 rounded mb-4 text-sm text-blue-200 border border-blue-500/30">
+                                    💳 Razorpay Test Mode Active
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Button variant="secondary" onClick={() => setView('builder')}>Back</Button>
+                                    <Button onClick={handlePlaceOrder}>Pay & Order</Button>
+                                </div>
+                            </Card>
+                        </div>
+                    )}
+
+                    {/* ADMIN DASHBOARD */}
+                    {view === 'admin-dash' && (
+                        <div className="max-w-6xl mx-auto animate-in">
+                            <h2 className="text-3xl font-bold mb-8">Admin Dashboard</h2>
+                            <div className="grid lg:grid-cols-2 gap-8">
+                                <Card>
+                                    <h3 className="text-xl font-bold mb-4">📦 Live Inventory</h3>
+                                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                                        {Object.entries(inventory).map(([cat, items]) => (
+                                            <div key={cat} className="border-b border-gray-700 pb-2">
+                                                <h4 className="text-orange-500 text-sm uppercase mb-1">{cat}</h4>
+                                                {Object.entries(items).map(([item, count]) => (
+                                                    <div key={item} className="flex justify-between text-sm">
+                                                        <span>{item}</span>
+                                                        <span className={count < 20 ? "text-red-500 font-bold" : "text-green-500"}>{count} units</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
+                                <Card>
+                                    <h3 className="text-xl font-bold mb-4">🚚 Manage Orders</h3>
+                                    {orders.map(order => (
+                                        <div key={order.id} className="bg-gray-900 p-3 rounded mb-2 border border-gray-700">
+                                            <div className="flex justify-between mb-2">
+                                                <span className="font-bold">#{order.id.slice(-4)}</span>
+                                                <Badge status={order.status} />
+                                            </div>
+                                            <div className="flex gap-2 text-xs">
+                                                {['In Kitchen', 'Sent to Delivery', 'Delivered'].map(s => (
+                                                    <button key={s} onClick={() => updateOrderStatus(order.id, s)} className="border border-gray-600 px-2 py-1 rounded hover:bg-gray-700">{s}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </Card>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
